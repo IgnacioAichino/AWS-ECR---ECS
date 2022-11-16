@@ -1,0 +1,113 @@
+variables:
+  REPOSITORY_URL: $URL repository in AWS
+  REPOSITORY_REGION: us-east-1
+  FRONTEND_IMAGE: front
+
+stages:
+  - prepare
+  - build
+  - publish 
+  - deploy-test
+  - deploy-prod
+
+
+#https://docs.gitlab.com/ee/ci/cloud_deployment/
+#Deploy to AWS from pipe GitLab
+#https://gitlab.com/gitlab-org/cloud-deploy/-/blob/master/aws/base/Dockerfile
+#Realiza la instlacion de CLI al container 
+Prepare:
+  stage: prepare
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  script:
+    - echo "REGISTRY_PASS=$(aws ecr get-login-password --region "$REPOSITORY_REGION")" >> build.env
+    #https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html
+    - echo "IMAGE_TAG=$(echo $CI_COMMIT_SHA | head -c 8)"  >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+
+Build:
+  stage: build
+  image:
+    name: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t $REPOSITORY_URL/$FRONTEND_IMAGE:$IMAGE_TAG -f ./front/Dockerfile ./front
+  needs:
+    - Prepare
+
+Publish:
+  stage: publish
+  image:
+    name: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - echo $REGISTRY_PASS | docker login --username AWS --password-stdin $REPOSITORY_URL
+  script:
+    - docker tag $REPOSITORY_URL/$FRONTEND_IMAGE:$IMAGE_TAG $REPOSITORY_URL/$FRONTEND_IMAGE:latest
+    - docker push $REPOSITORY_URL/$FRONTEND_IMAGE:$IMAGE_TAG
+    - docker push $REPOSITORY_URL/$FRONTEND_IMAGE:latest
+  needs:
+    - Prepare
+    - Build
+  only:
+    - develop
+
+deploy-test:
+  stage: deploy-test
+  variables:
+    OOPP_VERSION: $IMAGE_TAG
+    UPSTREAM_PROJECT: $CI_PROJECT_PATH
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest #image docker para CLI AWS
+  script: 
+      - echo "Deploying frontend version $APP_VERSION to TEST cluster"
+        #Installation CLI AWS
+      - curl -Lo /usr/local/bin/ecs-cli https://amazon-ecs-cli.s3.amazonaws.com/ecs-cli-linux-amd64-latest 
+      - chmod +x /usr/local/bin/ecs-cli
+      - ecs-cli --version
+      - cd ./ecs_deploy
+      - ls -latr
+        # Deployment Secrets
+      - export AWS_ACCESS_KEY_ID="$TEST_AWS_ACCESS_KEY_ID"
+      - export AWS_SECRET_ACCESS_KEY="$TEST_AWS_SECRET_ACCESS_KEY" 
+      # Application configuration Secrets
+      - export DB_USERNAME="$DB_USERNAME"
+      - export DB_PASSWORD="$TEST_DB_PASSWORD"
+      - export RECAPTCHA_SITE_KEY="$TEST_RECAPTCHA_SITE_KEY"
+      - export RECAPTCHA_SECRET_KEY="$TEST_RECAPTCHA_SECRET_KEY"         
+      - source ./env.test
+      - ./service_up.sh  
+  needs:
+    - Prepare
+    - Publish
+  only:
+    - develop
+
+deploy-prod:
+  stage: deploy-prod
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest #image docker para CLI AWS
+  when: manual
+  script: 
+      - echo "Deploying frontend version $APP_VERSION to PRODUCCION cluster"
+      #Installation CLI ecs AWS 
+      - curl -Lo /usr/local/bin/ecs-cli https://amazon-ecs-cli.s3.amazonaws.com/ecs-cli-linux-amd64-latest 
+      - chmod +x /usr/local/bin/ecs-cli
+      - ecs-cli --version
+      - cd ./ecs_deploy
+      - ls -latr
+       # Deployment Secrets
+      - export AWS_ACCESS_KEY_ID="$PROD_AWS_ACCESS_KEY_ID"
+      - export AWS_SECRET_ACCESS_KEY="$PROD_AWS_SECRET_ACCESS_KEY" 
+      # Application configuration Secrets
+      - export DB_USERNAME="$DB_USERNAME"
+      - export DB_PASSWORD="$PROD_DB_PASSWORD"
+      - export RECAPTCHA_SITE_KEY="$PROD_RECAPTCHA_SITE_KEY"
+      - export RECAPTCHA_SECRET_KEY="$PROD_RECAPTCHA_SECRET_KEY"        
+      - source ./env.prod
+      - ./service_up.sh
+  variables:
+    APP_VERSION: "latest"
+  only:
+      - prod
