@@ -1,0 +1,25 @@
+version: 1
+task_definition:
+  task_role_arn: ${ECS_EXECUTION_ROLE}
+  task_execution_role: ${ECS_EXECUTION_ROLE}
+  ecs_network_mode: awsvpc
+  task_size:
+    mem_limit: ${ECS_FRONT_MEM}
+    cpu_limit: ${ECS_FRONT_CPU}
+  services:
+    backend:
+      essential: true
+run_params:
+  network_configuration:
+    awsvpc_configuration:
+      subnets:
+        - ${AWS_PRIVATE_SUBNET1}
+        - ${AWS_PRIVATE_SUBNET2}
+        - ${AWS_PRIVATE_SUBNET3}
+      security_groups:
+        - ${AWS_APP_FRONT_SG}
+      assign_public_ip: DISABLED
+  service_discovery:
+    private_dns_namespace:
+      vpc: ${AWS_VPC}
+      name: ${AWS_NAME_SPACE}

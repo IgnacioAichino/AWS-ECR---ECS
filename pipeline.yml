@@ -54,6 +54,7 @@ Publish:
     - Build
   only:
     - develop
+    - main
 
 deploy-test:
   stage: deploy-test
